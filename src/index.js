@@ -11,8 +11,19 @@ const elements = {
   guard: document.querySelector('.js-guard'),
 };
 
+const simpleLightbox = new SimpleLightbox('.gallery a');
+
+const options = {
+  root: null,
+  rootMargin: '300px',
+};
+
+const observer = new IntersectionObserver(onLoadMore, options);
+
 let items;
 let getPhotos;
+let page = 1;
+let counterObserver = 0;
 
 elements.form.addEventListener('submit', onSearch);
 
@@ -22,19 +33,34 @@ async function onSearch(event) {
   elements.gallery.innerHTML = '';
 
   const photos = new FormData(event.target);
+
   items = Object.fromEntries(photos);
+  if (items.searchQuery === '') {
+    return;
+  }
 
   try {
     getPhotos = await searchPhotos(items.searchQuery, page);
-    Notiflix.Notify.success(
-      `Hooray! We found ${getPhotos.data.totalHits} images.`
-    );
+
+    if (getPhotos.data.totalHits) {
+      Notiflix.Notify.success(
+        `Hooray! We found ${getPhotos.data.totalHits} images.`
+      );
+    }
+    if (
+      getPhotos.data.hits.length * page >= getPhotos.data.totalHits &&
+      getPhotos.data.totalHits !== 0
+    ) {
+      Notiflix.Notify.info(
+        "We're sorry, but you've reached the end of search results."
+      );
+      observer.unobserve(elements.guard);
+    }
     elements.gallery.insertAdjacentHTML(
       'afterbegin',
       await createMarkup(getPhotos)
     );
-    new SimpleLightbox('.gallery a').refresh();
-
+    simpleLightbox.refresh();
     if (page < getPhotos.data.totalHits) {
       observer.observe(elements.guard);
     }
@@ -45,33 +71,10 @@ async function onSearch(event) {
   }
 }
 
-async function searchPhotos(photos, page = 1) {
-  const params = new URLSearchParams({
-    key: '40263466-7e415f5d97d0e5ac2b44404cf',
-    q: photos,
-    image_type: 'photo',
-    orientation: 'horizontal',
-    safesearch: true,
-    page,
-    per_page: 40,
-  });
-  const resp = await axios.get(`?${params}`).then(function (response) {
-    if (!response.data.hits.length) {
-      Notiflix.Report.info(
-        'Sorry, there are no images matching your search query. Please try again.',
-        ''
-      );
-    }
-    return response;
-  });
-  return resp;
-}
-
 function createMarkup(arr) {
   return arr.data.hits
     .map(
       ({
-        id,
         webformatURL,
         largeImageURL,
         tags,
@@ -81,7 +84,7 @@ function createMarkup(arr) {
         downloads,
       }) => {
         return `
-        <div class="photo-card" data-id="${id}">
+        <div class="photo-card">
             <a href="${largeImageURL}">
             <img src="${webformatURL}" alt="${tags}" loading="lazy" />
            
@@ -111,45 +114,59 @@ function createMarkup(arr) {
     .join('');
 }
 
-const options = {
-  root: null,
-  rootMargin: '300px',
-};
+async function searchPhotos(photos, page = 1) {
+  const params = new URLSearchParams({
+    key: '40263466-7e415f5d97d0e5ac2b44404cf',
+    q: photos,
+    image_type: 'photo',
+    orientation: 'horizontal',
+    safesearch: true,
+    page,
+    per_page: 40,
+  });
+  const resp = await axios.get(`?${params}`).then(function (response) {
+    return response;
+  });
+  if (resp.data.hits.length === 0 && resp.data.totalHits === 0) {
+    Notiflix.Report.info(
+      "Doesn't match",
+      'Sorry, there are no images matching your search query. Please try again.',
+      'Try again'
+    );
+  }
+  return resp;
+}
 
-const observer = new IntersectionObserver(onLoadMore, options);
-let page = 1;
+async function getMorePhotos() {
+  try {
+    page += 1;
 
-let counterObserver = 0;
+    const getMorePhoto = await searchPhotos(items.searchQuery, page);
+
+    elements.gallery.insertAdjacentHTML(
+      'beforeend',
+      createMarkup(getMorePhoto)
+    );
+
+    simpleLightbox.refresh();
+
+    if (getMorePhoto.data.hits.length * page >= getPhotos.data.totalHits) {
+      Notiflix.Notify.info(
+        "We're sorry, but you've reached the end of search results."
+      );
+      observer.unobserve(elements.guard);
+    }
+  } catch (err) {
+    Notiflix.Notify.failure(err);
+  }
+}
+
 async function onLoadMore(entries, observer) {
   counterObserver += 1;
 
   await entries.forEach(entry => {
     if (entry.isIntersecting) {
-      page += 1;
-
-      searchPhotos(items.searchQuery, page)
-        .then(elem => {
-          return elem;
-        })
-        .then(arr => {
-          elements.gallery.insertAdjacentHTML('beforeend', createMarkup(arr));
-          const { height: cardHeight } = document
-            .querySelector('.gallery')
-            .firstElementChild.getBoundingClientRect();
-
-          window.scrollBy({
-            top: cardHeight * 2,
-            behavior: 'smooth',
-          });
-          new SimpleLightbox('.gallery a').refresh();
-          if (getPhotos.data.hits.length * page >= getPhotos.data.totalHits) {
-            Notiflix.Notify.info(
-              "We're sorry, but you've reached the end of search results."
-            );
-            observer.unobserve(elements.guard);
-          }
-        })
-        .catch(err => Notiflix.Notify.failure(err));
+      getMorePhotos();
     }
   });
 }
