@@ -26,12 +26,15 @@ async function onSearch(event) {
 
   try {
     getPhotos = await searchPhotos(items.searchQuery, page);
-
+    Notiflix.Notify.success(
+      `Hooray! We found ${getPhotos.data.totalHits} images.`
+    );
     elements.gallery.insertAdjacentHTML(
       'afterbegin',
       await createMarkup(getPhotos)
     );
-    new SimpleLightbox('.gallery a');
+    new SimpleLightbox('.gallery a').refresh();
+
     if (page < getPhotos.data.totalHits) {
       observer.observe(elements.guard);
     }
@@ -123,21 +126,28 @@ async function onLoadMore(entries, observer) {
   await entries.forEach(entry => {
     if (entry.isIntersecting) {
       page += 1;
+
       searchPhotos(items.searchQuery, page)
         .then(elem => {
           return elem;
         })
         .then(arr => {
           elements.gallery.insertAdjacentHTML('beforeend', createMarkup(arr));
-          if (page === getPhotos.data.totalHits) {
+          const { height: cardHeight } = document
+            .querySelector('.gallery')
+            .firstElementChild.getBoundingClientRect();
+
+          window.scrollBy({
+            top: cardHeight * 2,
+            behavior: 'smooth',
+          });
+          new SimpleLightbox('.gallery a').refresh();
+          if (getPhotos.data.hits.length * page >= getPhotos.data.totalHits) {
             Notiflix.Notify.info(
               "We're sorry, but you've reached the end of search results."
             );
-          }
-          if (page >= getPhotos.data.totalHits) {
             observer.unobserve(elements.guard);
           }
-          new SimpleLightbox('.gallery a');
         })
         .catch(err => Notiflix.Notify.failure(err));
     }
